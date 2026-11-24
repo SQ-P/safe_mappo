@@ -1,0 +1,127 @@
+# Executable reproduction of the historical 3U + 8S + 2D Standard MAPPO
+# task and safety-execution contract.
+#
+# The archived high-level FACS/STAR selector implementation is no longer
+# present in this checkout and active entry points reject it fail-closed.
+# Historical evaluation recorded no selector intervention, so the executable
+# reproduction keeps the selector disabled while mapping the historical
+# guard, progress-aware TTC and STAR recovery settings onto the supported
+# shared safety-execution interface.
+extends: team_v4_rule_tracked.yaml
+
+research_line: csa_mappo
+algorithm: mappo
+device: cuda
+seed: 23
+
+env:
+  num_agents: 3
+  start_y_positions: [25.0, 50.0, 75.0]
+  goal_y_positions: [25.0, 50.0, 75.0]
+  static_obstacle_num: 8
+  dynamic_obstacle_num: 2
+  obstacle_slots: 6
+  observation_schema_version: tracked_obstacle_v2
+  reward_mode: team_v4_subgoal
+
+multi_agent:
+  actor_parameter_sharing: true
+  agent_update_order: simultaneous
+
+oracle_subgoal:
+  enabled: true
+
+subgoal_selector:
+  enabled: false
+  version: disabled_archived_v1
+
+safety_execution:
+  enabled: true
+  version: staged_joint_guard_ttc_v1
+  stages:
+    - initial_joint_guard
+    - obstacle_ttc
+    - final_joint_guard
+  recovery_enabled: true
+  safety_state_machine_version: star_scoped_recovery_v4
+  candidate_feasibility_version: guard_aligned_observable_v2
+  initial_joint_guard:
+    enabled: true
+    surface_clearance_m: 3.0
+    invariant_buffer_m: 0.25
+    pair_invariant_buffer_m: 0.25
+    action_shield_enabled: true
+    no_safe_candidate_mode: safe_brake
+  obstacle_execution_diagnostics:
+    enabled: true
+    ttc_horizon_seconds: 10.0
+  obstacle_ttc:
+    enabled: true
+    version: causal_ttc_progress_projection_v2
+    horizon_seconds: 10.0
+    warning_ttc_seconds: 5.0
+    emergency_ttc_seconds: 2.5
+  goal_boundary_corridor:
+    enabled: false
+    version: goal_boundary_corridor_v1
+    corridor_coordinate: 94.0
+  ttc_headroom_audit:
+    enabled: false
+    shadow_steps: 3
+    minimum_goal_velocity_gain_mps: 0.1
+    maximum_extra_actor_deviation: 0.25
+  closure_trace_audit:
+    enabled: false
+  recovery:
+    exit_stable_steps: 3
+    maximum_steps: 20
+    target_distance: 6.0
+    speed_fraction: 0.5
+    boundary_trigger_margin: 1.0
+    boundary_stall_patience_steps: 3
+    minimum_displacement_m: 0.05
+    obstacle_repulsion_margin_m: 4.0
+    attempt_steps: 20
+    maximum_attempts: 1
+    exclude_goal_agents: true
+    progress_patience_steps: 3
+    maximum_refreshes: 4
+    minimum_margin_improvement_m: 0.01
+    direction_unavailable_patience_steps: 3
+    escape_steps: 14
+    consolidation_steps: 6
+    release_hysteresis_m: 0.25
+    rapid_retrigger_window_steps: 5
+    lineage_max_incidents: 2
+    lineage_max_steps: 40
+    shadow_horizon_steps: 3
+    candidate_fixed_point_patience_steps: 2
+    candidate_minimum_margin_gain_m: 0.01
+  final_joint_guard:
+    enabled: true
+  telemetry:
+    schema: StageInterventionTraceV1
+    any_action_l2: 0.0000001
+    material_delta_v_mps: 0.05
+    large_delta_v_mps: 0.25
+
+train:
+  total_updates: 800
+  intervention_aware:
+    mode: disabled
+  checkpoint_updates: [100, 200, 400, 600, 800]
+  save_every: 100
+  save_periodic_checkpoints: true
+  log_every: 10
+
+evaluation:
+  episodes: 10
+  interval_updates: 100
+  seed_base: 111000
+  updates: [100, 200, 400, 600, 800]
+  save_episode_records: false
+
+output:
+  output_dir: results/paper/standard_mappo_3u_8s2d_legacy_execution_v1/seed_23
+  checkpoint_dir: results/paper/standard_mappo_3u_8s2d_legacy_execution_v1/seed_23/checkpoints
+  reject_nonempty: true

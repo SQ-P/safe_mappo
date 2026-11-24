@@ -1,0 +1,11 @@
+# Second preregistered Clean Standard seed.  This changes only the seed and
+# destination; every observation, Oracle, safety, and optimization setting is
+# inherited from the frozen active R1 configuration.
+extends: ../active/ia_mappo_v1_3u_6s1d_standard.yaml
+
+seed: 41
+
+output:
+  output_dir: results/ia_mappo_v1/3u_6s1d/standard_runtimefix_v1/seed_41
+  checkpoint_dir: results/ia_mappo_v1/3u_6s1d/standard_runtimefix_v1/seed_41/checkpoints
+  reject_nonempty: true

@@ -1,0 +1,9 @@
+extends: csa_mappo_3u_8s2d_seed23.yaml
+seed: 41
+train:
+  safety_alignment:
+    parent_checkpoint: results/paper/standard_mappo_3u_8s2d/seed_41/checkpoints/update_0400.pt
+output:
+  output_dir: results/paper/csa_mappo_3u_8s2d/seed_41
+  checkpoint_dir: results/paper/csa_mappo_3u_8s2d/seed_41/checkpoints
+  reject_nonempty: true

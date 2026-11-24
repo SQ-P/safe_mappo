@@ -1,0 +1,13 @@
+extends: ../../active/standard_mappo_3u_8s2d.yaml
+
+# No Guard, no TTC, no recovery.
+safety_execution:
+  recovery_enabled: false
+  initial_joint_guard:
+    enabled: false
+    action_shield_enabled: false
+  obstacle_ttc:
+    enabled: false
+  final_joint_guard:
+    enabled: false
+

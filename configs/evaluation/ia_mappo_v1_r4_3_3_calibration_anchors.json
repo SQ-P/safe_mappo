@@ -1,0 +1,41 @@
+{
+  "schema_version": "IAMAPPOR4_3_3CalibrationAnchorsV1",
+  "anchors": [
+    {
+      "name": "warmup_seed23_u100",
+      "config": "configs/generated/ia_mappo_v1_r4_2_1/stage_delayed_v4_seed23.yaml",
+      "checkpoint": "results/ia_mappo_v1/3u_6s1d/r4_2_1_pilot/stage_delayed_v4/seed_23/checkpoints/update_0100.pt",
+      "calibration_seed": 73100
+    },
+    {
+      "name": "warmup_seed41_u100",
+      "config": "configs/generated/ia_mappo_v1_r4_2_1/stage_delayed_v4_seed41.yaml",
+      "checkpoint": "results/ia_mappo_v1/3u_6s1d/r4_2_1_pilot/stage_delayed_v4/seed_41/checkpoints/update_0100.pt",
+      "calibration_seed": 74100
+    },
+    {
+      "name": "standard_seed23_u150",
+      "config": "configs/generated/ia_mappo_v1_r4_2_1/standard_seed23.yaml",
+      "checkpoint": "results/ia_mappo_v1/3u_6s1d/r4_2_1_pilot/standard/seed_23/checkpoints/update_0150.pt",
+      "calibration_seed": 73150
+    },
+    {
+      "name": "standard_seed41_u150",
+      "config": "configs/generated/ia_mappo_v1_r4_2_1/standard_seed41.yaml",
+      "checkpoint": "results/ia_mappo_v1/3u_6s1d/r4_2_1_pilot/standard/seed_41/checkpoints/update_0150.pt",
+      "calibration_seed": 74150
+    },
+    {
+      "name": "stage_delayed_v4_seed23_u150",
+      "config": "configs/generated/ia_mappo_v1_r4_2_1/stage_delayed_v4_seed23.yaml",
+      "checkpoint": "results/ia_mappo_v1/3u_6s1d/r4_2_1_pilot/stage_delayed_v4/seed_23/checkpoints/update_0150.pt",
+      "calibration_seed": 75150
+    },
+    {
+      "name": "stage_delayed_v4_seed41_u150",
+      "config": "configs/generated/ia_mappo_v1_r4_2_1/stage_delayed_v4_seed41.yaml",
+      "checkpoint": "results/ia_mappo_v1/3u_6s1d/r4_2_1_pilot/stage_delayed_v4/seed_41/checkpoints/update_0150.pt",
+      "calibration_seed": 76150
+    }
+  ]
+}

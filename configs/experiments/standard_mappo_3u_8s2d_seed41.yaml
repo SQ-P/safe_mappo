@@ -1,0 +1,6 @@
+extends: ../active/standard_mappo_3u_8s2d.yaml
+seed: 41
+output:
+  output_dir: results/paper/standard_mappo_3u_8s2d_legacy_execution_v1/seed_41
+  checkpoint_dir: results/paper/standard_mappo_3u_8s2d_legacy_execution_v1/seed_41/checkpoints
+  reject_nonempty: true

@@ -1,0 +1,25 @@
+{
+  "baseline": "configs/experiments/standard_mappo_3u_8s2d_seed23.yaml",
+  "baseline_resolved_sha256": "b7333c831daedf3607a6d70fc96d27a2f04605113db969ee9fd1382ebe4de687",
+  "baseline_source_sha256": {
+    "configs\\experiments\\standard_mappo_3u_8s2d_seed23.yaml": "2b67f964944f22144c816e0c2f824611466458b98ad374cd3cfd6afe0a232ba9",
+    "configs\\active\\standard_mappo_3u_8s2d.yaml": "5e56e682559cd291fdab82a67c24644b9f86be074c71efd00f5219cdd87f4887",
+    "configs\\active\\team_v4_rule_tracked.yaml": "7945b6f8caf68f3232b09c720e1483debe66bd602cb0dbed930ee2f7337d163e"
+  },
+  "unchanged_sections": [
+    "reward",
+    "model",
+    "train",
+    "multi_agent",
+    "oracle_subgoal",
+    "subgoal_selector",
+    "safety_execution",
+    "observation_normalization"
+  ],
+  "allowed_changed_sections": [
+    "env scenario geometry/sensing/horizon",
+    "evaluation.seed_base",
+    "output",
+    "verification_experiment"
+  ]
+}

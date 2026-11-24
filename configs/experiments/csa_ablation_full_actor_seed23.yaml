@@ -1,0 +1,11 @@
+extends: csa_mappo_3u_8s2d_seed23.yaml
+train:
+  safety_alignment:
+    adapter_rank: 0
+    train_backbone: true
+evaluation:
+  paper_method: csa_full_actor_finetune
+output:
+  output_dir: results/paper/csa_ablation_full_actor/seed_23
+  checkpoint_dir: results/paper/csa_ablation_full_actor/seed_23/checkpoints
+  reject_nonempty: true

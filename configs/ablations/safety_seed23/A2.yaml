@@ -1,0 +1,13 @@
+extends: ../../active/standard_mappo_3u_8s2d.yaml
+
+# TTC only; neither initial nor final Guard projection is allowed.
+safety_execution:
+  recovery_enabled: false
+  initial_joint_guard:
+    enabled: false
+    action_shield_enabled: false
+  obstacle_ttc:
+    enabled: true
+  final_joint_guard:
+    enabled: false
+

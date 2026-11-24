@@ -1,0 +1,11 @@
+schema_version: SafetyAblationPanelV1
+checkpoint: results/paper/standard_mappo_3u_8s2d_legacy_execution_v1/seed_23/checkpoints/update_0800.pt
+development_layouts: configs/evaluation/csa_actor_validation_119000_119039.json
+formal_layouts: configs/evaluation/safety_ablation_seed23_200.json
+arms:
+  A0: {guard: false, ttc: false, recovery: false}
+  A1: {guard: true,  ttc: false, recovery: false}
+  A2: {guard: false, ttc: true,  recovery: false}
+  A3: {guard: true,  ttc: true,  recovery: false}
+  A4: {guard: true,  ttc: true,  recovery: true}
+

@@ -1,0 +1,23 @@
+extends: ../active/standard_mappo_3u_8s2d.yaml
+seed: 23
+train:
+  total_updates: 100
+  checkpoint_updates: [100]
+  safety_alignment:
+    mode: counterfactual_adapter
+    parent_checkpoint: results/paper/standard_mappo_3u_8s2d/seed_23/checkpoints/update_0400.pt
+    critic_artifact: results/paper/csa_critic/r4_4/development/advantage_pairwise/advantage_critic.pt
+    critic_certification: results/paper/csa_critic/r4_4/fresh/fresh_certification.json
+    lambda_calibration: results/paper/csa_mappo/lambda_calibration_seed23.json
+    adapter_rank: 16
+    adapter_scale: 0.15
+    deadzone: [0.05, 0.05]
+    support_z_limit: 6.0
+    train_backbone: false
+evaluation:
+  safety_alignment_metrics: true
+  paper_method: csa_mappo
+output:
+  output_dir: results/paper/csa_mappo_3u_8s2d/seed_23
+  checkpoint_dir: results/paper/csa_mappo_3u_8s2d/seed_23/checkpoints
+  reject_nonempty: true

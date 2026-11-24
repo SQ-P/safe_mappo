@@ -1,0 +1,41 @@
+{
+  "schema_version": "IAMAPPOR4_2CalibrationAnchorsV1",
+  "anchors": [
+    {
+      "name": "standard_seed23_u50",
+      "config": "configs/generated/ia_mappo_v1_r4_1/standard_seed23.yaml",
+      "checkpoint": "results/ia_mappo_v1/3u_6s1d/r4_1_pilot/standard/seed_23/checkpoints/update_0050.pt",
+      "calibration_seed": 63050
+    },
+    {
+      "name": "standard_seed41_u50",
+      "config": "configs/generated/ia_mappo_v1_r4_1/standard_seed41.yaml",
+      "checkpoint": "results/ia_mappo_v1/3u_6s1d/r4_1_pilot/standard/seed_41/checkpoints/update_0050.pt",
+      "calibration_seed": 64050
+    },
+    {
+      "name": "standard_seed23_u100",
+      "config": "configs/generated/ia_mappo_v1_r4/standard_seed23.yaml",
+      "checkpoint": "results/ia_mappo_v1/3u_6s1d/r4_pilot/standard/seed_23/checkpoints/update_0100.pt",
+      "calibration_seed": 63100
+    },
+    {
+      "name": "standard_seed41_u100",
+      "config": "configs/generated/ia_mappo_v1_r4/standard_seed41.yaml",
+      "checkpoint": "results/ia_mappo_v1/3u_6s1d/r4_pilot/standard/seed_41/checkpoints/update_0100.pt",
+      "calibration_seed": 64100
+    },
+    {
+      "name": "standard_seed23_u200",
+      "config": "configs/generated/ia_mappo_v1_r4/standard_seed23.yaml",
+      "checkpoint": "results/ia_mappo_v1/3u_6s1d/r4_pilot/standard/seed_23/checkpoints/update_0200.pt",
+      "calibration_seed": 63200
+    },
+    {
+      "name": "standard_seed41_u200",
+      "config": "configs/generated/ia_mappo_v1_r4/standard_seed41.yaml",
+      "checkpoint": "results/ia_mappo_v1/3u_6s1d/r4_pilot/standard/seed_41/checkpoints/update_0200.pt",
+      "calibration_seed": 64200
+    }
+  ]
+}

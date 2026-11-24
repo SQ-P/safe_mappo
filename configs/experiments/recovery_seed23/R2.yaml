@@ -1,0 +1,7 @@
+version: calibrated_joint_recovery_v1
+arm: R2
+parent_recovery: star_persistent_recovery_v5_4
+horizon_steps: 3
+progress_tie_tolerance_m: 0.05
+# Development default; freeze on validation before final testing.
+uncertainty_mode: calibrated_fixed

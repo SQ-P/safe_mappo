@@ -1,0 +1,80 @@
+# Clean Standard MAPPO parent for the IA-MAPPO research line.
+# This chain inherits only the generic team task contract; it has no archived
+# high-level selector or historical action-matching parent.
+extends: team_v4_rule_tracked.yaml
+
+research_line: ia_mappo_v1
+algorithm: mappo
+device: cuda
+seed: 23
+
+env:
+  num_agents: 3
+  start_y_positions: [25.0, 50.0, 75.0]
+  goal_y_positions: [25.0, 50.0, 75.0]
+  static_obstacle_num: 6
+  dynamic_obstacle_num: 1
+  obstacle_slots: 8
+  observation_schema_version: tracked_obstacle_v2
+  reward_mode: team_v4_subgoal
+
+multi_agent:
+  actor_parameter_sharing: true
+  agent_update_order: simultaneous
+
+oracle_subgoal:
+  enabled: true
+  frozen: true
+
+subgoal_selector:
+  enabled: false
+  version: disabled_archived_v1
+
+safety_execution:
+  enabled: true
+  version: staged_joint_guard_ttc_v1
+  stages:
+    - initial_joint_guard
+    - obstacle_ttc
+    - final_joint_guard
+  recovery_enabled: true
+  initial_joint_guard:
+    enabled: true
+    surface_clearance_m: 3.0
+    invariant_buffer_m: 0.25
+    pair_invariant_buffer_m: 0.25
+    action_shield_enabled: true
+    no_safe_candidate_mode: safe_brake
+  obstacle_ttc:
+    enabled: true
+    version: causal_ttc_projection_v1
+    horizon_seconds: 10.0
+    warning_ttc_seconds: 5.0
+    emergency_ttc_seconds: 2.5
+  final_joint_guard:
+    enabled: true
+  telemetry:
+    schema: StageInterventionTraceV1
+    any_action_l2: 0.0000001
+    material_delta_v_mps: 0.05
+    large_delta_v_mps: 0.25
+
+train:
+  total_updates: 200
+  intervention_aware:
+    mode: disabled
+  checkpoint_updates: [100, 200]
+  save_every: 100
+  save_periodic_checkpoints: true
+  log_every: 10
+
+evaluation:
+  episodes: 40
+  interval_updates: 100
+  seed_base: 41000
+  save_episode_records: true
+
+output:
+  output_dir: results/ia_mappo_v1/3u_6s1d/standard_runtimefix_v1/seed_23
+  checkpoint_dir: results/ia_mappo_v1/3u_6s1d/standard_runtimefix_v1/seed_23/checkpoints
+  reject_nonempty: true

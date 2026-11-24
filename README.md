@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # safe_mappo
 一种帮助强化学习的安全层设计
 # MAPPO Safety Alignment
@@ -29,7 +28,3 @@ pytest -q tests/test_mappo.py tests/test_csa_mappo.py tests/test_intervention_ad
 ```
 
 研究边界见 [docs/PROJECT_SCOPE.md](docs/PROJECT_SCOPE.md)，正式执行顺序见 [docs/CSA_MAPPO_IMPLEMENTATION_AND_PROTOCOL.md](docs/CSA_MAPPO_IMPLEMENTATION_AND_PROTOCOL.md)。
-=======
-# safe_mappo
-一种帮助强化学习的安全层设计
->>>>>>> 2320f319373a8108dba15c2ed21726394db619ca

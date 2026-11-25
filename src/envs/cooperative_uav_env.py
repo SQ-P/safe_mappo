@@ -57,6 +57,12 @@ from src.safety.contracts import (
     action_modification_level,
 )
 from src.safety.counterfactual import ShadowSafetyResultV1, ShadowSafetyResultV2
+from src.safety.ucr_jsf_l import (
+    JointSafetyInputV1 as UCRJointSafetyInputV1,
+    ObstacleTrackV1 as UCRObstacleTrackV1,
+    UCRJSFLExecutorV1,
+)
+from src.safety.ucr_jsf_l_v2 import UCRJSFLExecutorV2
 
 
 _INCIDENT_RECOVERY_VERSIONS = frozenset({
@@ -329,31 +335,93 @@ class CooperativeUAVEnv(gym.Env):
         }
         safety_execution = dict(cfg.get("safety_execution", {}))
         self.safety_execution_enabled = bool(safety_execution.get("enabled", False))
-        self.safety_recovery_enabled = bool(
-            safety_execution.get("recovery_enabled", False)
+        self.safety_execution_version = str(
+            safety_execution.get("version", "disabled_v1")
         )
-        if self.safety_execution_enabled and str(safety_execution.get("version")) != (
-            "staged_joint_guard_ttc_v1"
-        ):
+        self.ucr_jsf_l_v1_enabled = bool(
+            self.safety_execution_enabled
+            and self.safety_execution_version == "ucr_jsf_l_v1"
+        )
+        self.ucr_jsf_l_v2_enabled = bool(
+            self.safety_execution_enabled
+            and self.safety_execution_version == "ucr_jsf_l_v2"
+        )
+        self.ucr_jsf_l_enabled = bool(
+            self.ucr_jsf_l_v1_enabled or self.ucr_jsf_l_v2_enabled
+        )
+        self.legacy_staged_safety_enabled = bool(
+            self.safety_execution_enabled
+            and self.safety_execution_version == "staged_joint_guard_ttc_v1"
+        )
+        if self.safety_execution_enabled and self.safety_execution_version not in {
+            "staged_joint_guard_ttc_v1", "ucr_jsf_l_v1", "ucr_jsf_l_v2",
+        }:
             raise ValueError("unsupported shared safety execution version")
+        self.safety_recovery_enabled = bool(
+            self.legacy_staged_safety_enabled
+            and safety_execution.get("recovery_enabled", False)
+        )
         registered_stages = tuple(safety_execution.get("stages", ()))
-        if self.safety_execution_enabled and registered_stages != (
+        if self.legacy_staged_safety_enabled and registered_stages != (
             "initial_joint_guard", "obstacle_ttc", "final_joint_guard"
         ):
             raise ValueError("safety_execution stages must use the preregistered order")
+        if self.ucr_jsf_l_enabled and registered_stages != (
+            "joint_safety_selection",
+        ):
+            raise ValueError(
+                f"{self.safety_execution_version} requires one joint_safety_selection stage"
+            )
+        if self.ucr_jsf_l_enabled:
+            legacy_keys = {
+                "initial_joint_guard", "obstacle_ttc", "final_joint_guard",
+                "goal_boundary_corridor", "safety_state_machine_version",
+                "candidate_feasibility_version", "recovery_enabled",
+            }.intersection(safety_execution)
+            if legacy_keys:
+                raise ValueError(
+                    f"{self.safety_execution_version} rejects mixed legacy executor configuration: "
+                    + ", ".join(sorted(legacy_keys))
+                )
         guard_config = dict(safety_execution.get("initial_joint_guard", {}))
         self.boundary_guard = JointSafetyGuardV2(guard_config)
         self.initial_joint_guard_enabled = bool(
-            self.safety_execution_enabled
+            self.legacy_staged_safety_enabled
             and self.boundary_guard.enabled
             and self.boundary_guard.action_shield_enabled
         )
         self.final_joint_guard_enabled = bool(
-            self.safety_execution_enabled
+            self.legacy_staged_safety_enabled
             and safety_execution.get("final_joint_guard", {}).get(
                 "enabled", False
             )
         )
+        if self.ucr_jsf_l_v1_enabled:
+            self.ucr_jsf_l_executor = UCRJSFLExecutorV1(
+                safety_execution, num_agents=self.num_agents
+            )
+        elif self.ucr_jsf_l_v2_enabled:
+            self.ucr_jsf_l_executor = UCRJSFLExecutorV2(
+                safety_execution, num_agents=self.num_agents
+            )
+        else:
+            self.ucr_jsf_l_executor = None
+        self.last_joint_safety_trace = None
+        self.last_stage_intervention_trace = None
+        self.ucr_jsf_l_intervention_count = 0
+        self.ucr_jsf_l_search_exhaustion_count = 0
+        self.ucr_jsf_l_unknown_evidence_step_count = 0
+        self.ucr_jsf_l_step_count = 0
+        self.ucr_jsf_l_stall_step_count = 0
+        self.ucr_jsf_l_passing_side_flip_count = 0
+        self.ucr_jsf_l_liveness_recovery_attempt_count = 0
+        self.ucr_jsf_l_liveness_recovery_success_count = 0
+        self.ucr_jsf_l_unknown_candidate_count = 0
+        self.ucr_jsf_l_evaluated_candidate_count = 0
+        self.ucr_jsf_l_emergency_action_count = 0
+        self.ucr_jsf_l_mode_step_counts = {
+            "NORMAL": 0, "STALL_ESCAPE": 0, "SAFETY_RECOVERY": 0,
+        }
         self.require_primary_segment_clearance = False
         self.stagnation_recovery_enabled = False
         self.stagnation_patience = 2
@@ -1276,6 +1344,43 @@ class CooperativeUAVEnv(gym.Env):
             ),
         )
 
+    def _ucr_jsf_l_input(self) -> UCRJointSafetyInputV1:
+        """Translate policy-visible tracks into the independent V1 contract."""
+
+        visible = []
+        for agent_id in range(self.num_agents):
+            rows = []
+            for item in self._tracked_obstacles(agent_id):
+                rows.append(UCRObstacleTrackV1(
+                    observer_id=int(agent_id),
+                    track_id=int(item["obstacle_id"]),
+                    relative_position=tuple(
+                        float(value) for value in item["relative_position"]
+                    ),
+                    relative_velocity=tuple(
+                        float(value) for value in item["relative_velocity"]
+                    ),
+                    radius=float(item["obstacle"].radius),
+                    velocity_valid=bool(item["velocity_valid"]),
+                ))
+            visible.append(tuple(rows))
+        return UCRJointSafetyInputV1.from_arrays(
+            positions=self.positions,
+            velocities=self.velocities,
+            final_goals=self.goals,
+            visible_obstacles=visible,
+            map_size=self.map_size,
+            agent_radius=self.agent_radius,
+            goal_radius=self.goal_radius,
+            max_speed=self.agent_max_speed,
+            max_acceleration=self.agent_max_acceleration,
+            dt=self.dt,
+            step=self.step_count,
+            obstacle_slot_saturated=tuple(
+                len(row) >= self.obstacle_slots for row in visible
+            ),
+        )
+
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         """在左侧生成 UAV、右侧生成交叉目标，并随机生成圆形障碍物。"""
@@ -1467,6 +1572,24 @@ class CooperativeUAVEnv(gym.Env):
         self._closure_budget_counted_step = -1
         self._current_action_trace = {}
         self._reset_action_stage_attribution()
+        self.last_stage_intervention_trace = None
+        self.last_joint_safety_trace = None
+        self.ucr_jsf_l_intervention_count = 0
+        self.ucr_jsf_l_search_exhaustion_count = 0
+        self.ucr_jsf_l_unknown_evidence_step_count = 0
+        self.ucr_jsf_l_step_count = 0
+        self.ucr_jsf_l_stall_step_count = 0
+        self.ucr_jsf_l_passing_side_flip_count = 0
+        self.ucr_jsf_l_liveness_recovery_attempt_count = 0
+        self.ucr_jsf_l_liveness_recovery_success_count = 0
+        self.ucr_jsf_l_unknown_candidate_count = 0
+        self.ucr_jsf_l_evaluated_candidate_count = 0
+        self.ucr_jsf_l_emergency_action_count = 0
+        self.ucr_jsf_l_mode_step_counts = {
+            "NORMAL": 0, "STALL_ESCAPE": 0, "SAFETY_RECOVERY": 0,
+        }
+        if self.ucr_jsf_l_executor is not None:
+            self.ucr_jsf_l_executor.reset()
         self._star_recovery_offending_pairs = ()
         self._star_recovery_affected_mask[:] = False
         self._boundary_stall_steps[:] = 0
@@ -5235,9 +5358,10 @@ class CooperativeUAVEnv(gym.Env):
             self._current_action_stage_actions["actor_raw"] = (
                 requested_actions.astype(np.float64).copy()
             )
-        self._trace_action_stage_snapshot("actor_raw", requested_actions)
-        self._run_closure_trace_audit(requested_actions)
-        self._observe_closure_consistency(requested_actions)
+        if not self.ucr_jsf_l_enabled:
+            self._trace_action_stage_snapshot("actor_raw", requested_actions)
+            self._run_closure_trace_audit(requested_actions)
+            self._observe_closure_consistency(requested_actions)
         if (
             self.star_safety_state_machine_version
             in {"star_persistent_recovery_v5_3", "star_persistent_recovery_v5_4"}
@@ -5283,7 +5407,8 @@ class CooperativeUAVEnv(gym.Env):
                 self.recovery_phase = "ESCAPE"
                 self._safe_recovery_target = None
                 self._recovery_stable_steps = 0
-        self._update_obstacle_execution_diagnostics()
+        if not self.ucr_jsf_l_enabled:
+            self._update_obstacle_execution_diagnostics()
         recovery_control_applied = False
         v5_release_brake_step = bool(
             self.star_safety_state_machine_version
@@ -5330,9 +5455,10 @@ class CooperativeUAVEnv(gym.Env):
                 else:
                     values = recovery_actions
                 recovery_control_applied = True
-        self._record_action_stage(
-            "recovery_overlay", requested_actions, values
-        )
+        if not self.ucr_jsf_l_enabled:
+            self._record_action_stage(
+                "recovery_overlay", requested_actions, values
+            )
         corridor_input_actions = values.copy()
         goal_corridor_decision = None
         if self.goal_boundary_corridor_enabled:
@@ -5370,9 +5496,10 @@ class CooperativeUAVEnv(gym.Env):
                     list(row) for row in goal_corridor_decision.affected_axes
                 ],
             }
-        self._record_action_stage(
-            "goal_corridor", corridor_input_actions, values
-        )
+        if not self.ucr_jsf_l_enabled:
+            self._record_action_stage(
+                "goal_corridor", corridor_input_actions, values
+            )
         control_requested_actions = values.copy()
         previous_positions = self.positions.copy()
         previous_velocities = self.velocities.copy()
@@ -5391,12 +5518,62 @@ class CooperativeUAVEnv(gym.Env):
         )
         causal_obstacle_snapshot = (
             self._safety_planning_snapshot()
-            if self.safety_execution_enabled and self.obstacle_execution_guard_enabled
+            if self.legacy_staged_safety_enabled
+            and self.obstacle_execution_guard_enabled
             else None
         )
+        if self.ucr_jsf_l_enabled:
+            if self.ucr_jsf_l_executor is None:
+                raise RuntimeError(
+                    f"{self.safety_execution_version} executor was not initialized"
+                )
+            joint_output = self.ucr_jsf_l_executor.execute(
+                self._ucr_jsf_l_input(), values
+            )
+            values = joint_output.actions.copy()
+            self.last_joint_safety_trace = joint_output.trace
+            self.last_stage_intervention_trace = None
+            self.ucr_jsf_l_intervention_count += int(
+                any(joint_output.trace.intervention_mask)
+            )
+            self.ucr_jsf_l_search_exhaustion_count += int(
+                joint_output.trace.candidate_search_exhausted
+            )
+            self.ucr_jsf_l_unknown_evidence_step_count += int(
+                bool(joint_output.trace.unknown_evidence)
+            )
+            self.ucr_jsf_l_step_count += 1
+            self.ucr_jsf_l_stall_step_count += int(
+                joint_output.trace.stall_agent_count > 0
+            )
+            self.ucr_jsf_l_passing_side_flip_count += int(
+                joint_output.trace.passing_side_flip_count_step
+            )
+            self.ucr_jsf_l_liveness_recovery_attempt_count += int(
+                joint_output.trace.mode_before != "STALL_ESCAPE"
+                and joint_output.trace.mode_after == "STALL_ESCAPE"
+            )
+            self.ucr_jsf_l_liveness_recovery_success_count += int(
+                joint_output.trace.liveness_recovery_success_step
+            )
+            self.ucr_jsf_l_unknown_candidate_count += int(
+                joint_output.trace.unknown_candidate_count
+            )
+            self.ucr_jsf_l_evaluated_candidate_count += int(
+                joint_output.trace.evaluated_candidate_count
+            )
+            self.ucr_jsf_l_emergency_action_count += int(
+                joint_output.trace.emergency_action_selected
+            )
+            self.ucr_jsf_l_mode_step_counts[
+                joint_output.trace.mode_after
+            ] += 1
+            self._current_action_stage_actions["ucr_jsf_l_final"] = (
+                values.astype(np.float64).copy()
+            )
         for obstacle in self.obstacles:
             obstacle.step(self.dt, tuple(self.map_size))
-        if self.safety_execution_enabled and (
+        if self.legacy_staged_safety_enabled and (
             self.initial_joint_guard_enabled
             or causal_obstacle_snapshot is not None
             or self.final_joint_guard_enabled
@@ -5823,7 +6000,7 @@ class CooperativeUAVEnv(gym.Env):
                 self._safe_recovery_target = None
                 self._recovery_stable_steps = 0
                 self._last_recovery_reason = "joint_guard_infeasible"
-        else:
+        elif not self.ucr_jsf_l_enabled:
             self._last_boundary_guard_result = {
                 "requested_actions": requested_actions.astype(float).tolist(),
                 "executed_actions": values.astype(float).tolist(),
@@ -5839,8 +6016,9 @@ class CooperativeUAVEnv(gym.Env):
             )
             self._record_action_stage("obstacle_ttc", values, values)
             self._record_action_stage("final_joint_guard", values, values)
-        self._record_action_stage("total", requested_actions, values)
-        self._finalize_stage_intervention_trace(requested_actions, values)
+        if not self.ucr_jsf_l_enabled:
+            self._record_action_stage("total", requested_actions, values)
+            self._finalize_stage_intervention_trace(requested_actions, values)
         if self.runtime_telemetry_level != "train_minimal":
             self._current_action_stage_actions["executed"] = (
                 values.astype(np.float64).copy()
@@ -5859,7 +6037,7 @@ class CooperativeUAVEnv(gym.Env):
         # Diagnostic-only capture on an isolated clone. In normal runs this
         # hook is absent and the safety execution path is unchanged.
         ppcsa_capture = getattr(self, "_ppcsa_capture_control", None)
-        if ppcsa_capture is not None:
+        if ppcsa_capture is not None and not self.ucr_jsf_l_enabled:
             ppcsa_capture(values.copy(), self, {
                 "initial_guard": initial_guard_result.summary(),
                 "final_guard": deepcopy(self._last_boundary_guard_result),
@@ -6090,6 +6268,11 @@ class CooperativeUAVEnv(gym.Env):
                     replace(record, eligible_for_actor_risk=False)
                     for record in self.last_stage_intervention_trace.records
                 ),
+                terminal_transition=True,
+            )
+        if terminal_transition and self.last_joint_safety_trace is not None:
+            self.last_joint_safety_trace = replace(
+                self.last_joint_safety_trace,
                 terminal_transition=True,
             )
         shaping_next_potential = 0.0 if terminal_transition else team_potential
@@ -6393,7 +6576,28 @@ class CooperativeUAVEnv(gym.Env):
             ),
             dtype=bool,
         ) & execution_intervention_mask
-        if obstacle_fallback_applied:
+        if self.ucr_jsf_l_enabled:
+            observed_constraint_pass = bool(
+                self.last_joint_safety_trace is not None
+                and self.last_joint_safety_trace.observed_constraint_pass_count > 0
+            )
+            execution_target_eligible = np.full(
+                self.num_agents,
+                bool(
+                    not self.terminated
+                    and not self.truncated
+                    and observed_constraint_pass
+                ),
+                dtype=bool,
+            ) & execution_intervention_mask
+            execution_stage = (
+                "ucr_jsf_l:"
+                + (
+                    self.last_joint_safety_trace.mode_after.lower()
+                    if self.last_joint_safety_trace is not None else "unknown"
+                )
+            )
+        elif obstacle_fallback_applied:
             execution_stage = "obstacle_fallback"
         elif recovery_control_applied:
             execution_stage = "recovery"
@@ -6481,6 +6685,42 @@ class CooperativeUAVEnv(gym.Env):
             "causal_safety_context": causal_safety_context.copy(),
             "current_safety_margin": float(current_safety_margin),
             "stage_intervention_trace": self.last_stage_intervention_trace,
+            "joint_safety_trace": self.last_joint_safety_trace,
+            "safety_execution_version": self.safety_execution_version,
+            "ucr_jsf_l_intervention_count": int(
+                self.ucr_jsf_l_intervention_count
+            ),
+            "ucr_jsf_l_search_exhaustion_count": int(
+                self.ucr_jsf_l_search_exhaustion_count
+            ),
+            "ucr_jsf_l_unknown_evidence_step_count": int(
+                self.ucr_jsf_l_unknown_evidence_step_count
+            ),
+            "ucr_jsf_l_mode_step_counts": dict(
+                self.ucr_jsf_l_mode_step_counts
+            ),
+            "ucr_jsf_l_stall_step_ratio": float(
+                self.ucr_jsf_l_stall_step_count
+                / max(self.ucr_jsf_l_step_count, 1)
+            ),
+            "ucr_jsf_l_passing_side_flip_count": int(
+                self.ucr_jsf_l_passing_side_flip_count
+            ),
+            "ucr_jsf_l_liveness_recovery_success_rate": float(
+                self.ucr_jsf_l_liveness_recovery_success_count
+                / max(self.ucr_jsf_l_liveness_recovery_attempt_count, 1)
+            ),
+            "ucr_jsf_l_candidate_unknown_rate": float(
+                self.ucr_jsf_l_unknown_candidate_count
+                / max(self.ucr_jsf_l_evaluated_candidate_count, 1)
+            ),
+            "ucr_jsf_l_joint_intervention_rate": float(
+                self.ucr_jsf_l_intervention_count
+                / max(self.ucr_jsf_l_step_count, 1)
+            ),
+            "ucr_jsf_l_emergency_action_count": int(
+                self.ucr_jsf_l_emergency_action_count
+            ),
             "obstacle_ttc_fallback_applied": bool(
                 obstacle_fallback_applied
             ),

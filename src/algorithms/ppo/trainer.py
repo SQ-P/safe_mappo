@@ -191,6 +191,50 @@ def _registered_safety_ablation_changes(
     return changes
 
 
+def _registered_safety_executor_transition(
+    checkpoint_contract: Mapping[str, Any],
+    runtime_contract: Mapping[str, Any],
+) -> dict[str, str] | None:
+    """Allow exactly the preregistered staged-to-UCR executor replacement.
+
+    Environment, Oracle, reward, observation, model and PPO contracts must be
+    byte-for-byte equivalent after canonical task-contract construction.
+    """
+
+    parent = deepcopy(dict(checkpoint_contract))
+    child = deepcopy(dict(runtime_contract))
+    parent_safety = dict(parent.pop("safety_execution", {}))
+    child_safety = dict(child.pop("safety_execution", {}))
+    # This registered evaluation-only transition accepts the retained V4
+    # checkpoint and the short-lived V5 spelling without changing the global
+    # task contract used by ordinary training/resume paths.
+    parent_version = parent.pop("task_contract_version", 4)
+    child_version = child.pop("task_contract_version", 4)
+    if parent_version not in {4, 5} or child_version not in {4, 5}:
+        return None
+    for contract in (parent, child):
+        oracle = contract.get("oracle_subgoal")
+        if isinstance(oracle, dict) and oracle.get("enabled") is False:
+            oracle.setdefault("generation_enabled", False)
+    if parent != child:
+        return None
+    if not bool(parent_safety.get("enabled", False)) or not bool(
+        child_safety.get("enabled", False)
+    ):
+        return None
+    if parent_safety.get("version") != "staged_joint_guard_ttc_v1":
+        return None
+    runtime_version = child_safety.get("version")
+    if runtime_version not in {"ucr_jsf_l_v1", "ucr_jsf_l_v2"}:
+        return None
+    if tuple(child_safety.get("stages", ())) != ("joint_safety_selection",):
+        return None
+    return {
+        "checkpoint": "staged_joint_guard_ttc_v1",
+        "runtime": str(runtime_version),
+    }
+
+
 TRAIN_METRICS_SCHEMA_VERSION = "train_metrics_v2_compact"
 
 # These aliases are retained inside the environment/trainer for historical
@@ -318,9 +362,11 @@ class PPOTrainer:
         requested_safety = dict(env_config["safety_execution"])
         requested_safety_enabled = bool(requested_safety.get("enabled", False))
         actual_safety_contract = {
+            "version": str(self.env.safety_execution_version),
             "safety_execution_enabled": bool(
                 self.env.safety_execution_enabled
             ),
+            "ucr_jsf_l_enabled": bool(self.env.ucr_jsf_l_enabled),
             "initial_joint_guard_enabled": bool(
                 self.env.initial_joint_guard_enabled
             ),
@@ -333,7 +379,14 @@ class PPOTrainer:
             "recovery_enabled": bool(self.env.safety_recovery_enabled),
         }
         requested_safety_contract = {
+            "version": str(requested_safety.get("version", "disabled_v1")),
             "safety_execution_enabled": requested_safety_enabled,
+            "ucr_jsf_l_enabled": bool(
+                requested_safety_enabled
+                and requested_safety.get("version") in {
+                    "ucr_jsf_l_v1", "ucr_jsf_l_v2",
+                }
+            ),
             "initial_joint_guard_enabled": bool(
                 requested_safety.get("initial_joint_guard", {}).get(
                     "enabled", False
@@ -362,7 +415,7 @@ class PPOTrainer:
         if requested_safety_enabled:
             mismatches = [
                 key for key, expected in requested_safety_contract.items()
-                if expected and not actual_safety_contract[key]
+                if actual_safety_contract[key] != expected
             ]
             if mismatches:
                 self.runtime_contract_assertion["passed"] = False
@@ -433,6 +486,8 @@ class PPOTrainer:
         self.ood_evaluation_changes: dict[str, dict[str, Any]] = {}
         self.safety_ablation_intervention_used = False
         self.safety_ablation_changes: dict[str, dict[str, bool]] = {}
+        self.safety_executor_transition_used = False
+        self.safety_executor_transition: dict[str, str] = {}
         self.parent_task_config_fingerprint: str | None = None
         self.curriculum_history: list[dict[str, Any]] = []
         self._resumed_from_checkpoint = False
@@ -2125,6 +2180,8 @@ class PPOTrainer:
     def train(self) -> dict[str, Any]:
         if getattr(self, "recovery_study_evaluation_only", False):
             raise ValueError("recovery study checkpoint transition is evaluation-only")
+        if self.safety_executor_transition_used:
+            raise ValueError("safety executor checkpoint transition is evaluation-only")
         if str(self.config.get("subgoal_selector", {}).get("mode", "rule")) == "llm":
             raise ValueError("constrained LLM subgoal selection is evaluation-only")
         if self.ood_evaluation_intervention_used:
@@ -3039,6 +3096,8 @@ class PPOTrainer:
                         "early" if progress_ratio < 1.0 / 3.0 else
                         "middle" if progress_ratio < 0.8 else "near_goal"
                     )
+                    joint_safety_trace = info.get("joint_safety_trace")
+                    legacy_stage_metrics_applicable = joint_safety_trace is None
                     episode_records.append(
                         {
                             "update": int(self.current_update),
@@ -3066,6 +3125,80 @@ class PPOTrainer:
                                 self.learner_contract_fingerprint()
                             ),
                             "checkpoint_sha256": self._loaded_checkpoint_hash,
+                            "safety_execution_version": info.get(
+                                "safety_execution_version"
+                            ),
+                            "joint_safety_trace_schema": getattr(
+                                joint_safety_trace, "schema_version", None
+                            ),
+                            "joint_safety_mode": getattr(
+                                joint_safety_trace, "mode_after", None
+                            ),
+                            "joint_safety_selected_source": getattr(
+                                joint_safety_trace, "selected_source", None
+                            ),
+                            "joint_safety_certified_candidate_count": getattr(
+                                joint_safety_trace, "certified_candidate_count", None
+                            ),
+                            "joint_safety_selected_evidence_status": getattr(
+                                joint_safety_trace, "selected_evidence_status", None
+                            ),
+                            "joint_safety_observed_constraint_pass_count": getattr(
+                                joint_safety_trace,
+                                "observed_constraint_pass_count",
+                                None,
+                            ),
+                            "joint_safety_model_admissible_candidate_count": getattr(
+                                joint_safety_trace,
+                                "model_admissible_candidate_count",
+                                None,
+                            ),
+                            "joint_safety_evidence_insufficient_candidate_count": getattr(
+                                joint_safety_trace,
+                                "evidence_insufficient_candidate_count",
+                                None,
+                            ),
+                            "joint_safety_rejected_candidate_count": getattr(
+                                joint_safety_trace, "rejected_candidate_count", None
+                            ),
+                            "joint_safety_candidate_search_exhausted": getattr(
+                                joint_safety_trace, "candidate_search_exhausted", None
+                            ),
+                            "ucr_jsf_l_intervention_count": int(
+                                info.get("ucr_jsf_l_intervention_count", 0)
+                            ),
+                            "ucr_jsf_l_search_exhaustion_count": int(
+                                info.get("ucr_jsf_l_search_exhaustion_count", 0)
+                            ),
+                            "ucr_jsf_l_unknown_evidence_step_count": int(
+                                info.get("ucr_jsf_l_unknown_evidence_step_count", 0)
+                            ),
+                            "ucr_jsf_l_mode_step_counts": dict(
+                                info.get("ucr_jsf_l_mode_step_counts", {})
+                            ),
+                            "ucr_jsf_l_stall_step_ratio": float(
+                                info.get("ucr_jsf_l_stall_step_ratio", 0.0)
+                            ),
+                            "ucr_jsf_l_passing_side_flip_count": int(
+                                info.get("ucr_jsf_l_passing_side_flip_count", 0)
+                            ),
+                            "ucr_jsf_l_liveness_recovery_success_rate": float(
+                                info.get(
+                                    "ucr_jsf_l_liveness_recovery_success_rate", 0.0
+                                )
+                            ),
+                            "ucr_jsf_l_candidate_unknown_rate": float(
+                                info.get("ucr_jsf_l_candidate_unknown_rate", 0.0)
+                            ),
+                            "ucr_jsf_l_joint_intervention_rate": float(
+                                info.get("ucr_jsf_l_joint_intervention_rate", 0.0)
+                            ),
+                            "ucr_jsf_l_emergency_action_count": int(
+                                info.get("ucr_jsf_l_emergency_action_count", 0)
+                            ),
+                            "legacy_stage_metrics_applicable": (
+                                legacy_stage_metrics_applicable
+                            ),
                             "collision_mode": self.env.collision_mode,
                             "outcome": info.get("outcome"),
                             "terminated": bool(terminated), "truncated": bool(truncated),
@@ -3172,18 +3305,22 @@ class PPOTrainer:
                             "last_20_raw_action_norm_mean_per_agent": stage_norms[
                                 "actor_raw"
                             ],
-                            "last_20_recovery_action_norm_mean_per_agent": stage_norms[
-                                "recovery_overlay"
-                            ],
-                            "last_20_initial_guard_action_norm_mean_per_agent": stage_norms[
-                                "initial_joint_guard"
-                            ],
-                            "last_20_ttc_action_norm_mean_per_agent": stage_norms[
-                                "obstacle_ttc"
-                            ],
-                            "last_20_final_guard_action_norm_mean_per_agent": stage_norms[
-                                "final_joint_guard"
-                            ],
+                            "last_20_recovery_action_norm_mean_per_agent": (
+                                stage_norms["recovery_overlay"]
+                                if legacy_stage_metrics_applicable else None
+                            ),
+                            "last_20_initial_guard_action_norm_mean_per_agent": (
+                                stage_norms["initial_joint_guard"]
+                                if legacy_stage_metrics_applicable else None
+                            ),
+                            "last_20_ttc_action_norm_mean_per_agent": (
+                                stage_norms["obstacle_ttc"]
+                                if legacy_stage_metrics_applicable else None
+                            ),
+                            "last_20_final_guard_action_norm_mean_per_agent": (
+                                stage_norms["final_joint_guard"]
+                                if legacy_stage_metrics_applicable else None
+                            ),
                             "last_20_executed_action_norm_mean_per_agent": stage_norms[
                                 "executed"
                             ],
@@ -3419,6 +3556,9 @@ class PPOTrainer:
         result = {
             "algorithm": self.algorithm,
             "algorithm_variant": self.algorithm_variant,
+            "safety_execution_version": str(
+                getattr(self.env, "safety_execution_version", "disabled_v1")
+            ),
             "collision_mode": self.env.collision_mode,
             "episodes": int(episodes),
             "task_config_fingerprint": self.task_config_fingerprint(),
@@ -3459,6 +3599,46 @@ class PPOTrainer:
             "safety_ablation_changes": deepcopy(
                 self.safety_ablation_changes
             ),
+            "safety_executor_transition_used": bool(
+                self.safety_executor_transition_used
+            ),
+            "safety_executor_transition": deepcopy(
+                self.safety_executor_transition
+            ),
+            "legacy_stage_metrics_applicable": bool(all(
+                row.get("legacy_stage_metrics_applicable", True)
+                for row in episode_records
+            )),
+            "legacy_stage_metrics_status": (
+                "applicable" if all(
+                    row.get("legacy_stage_metrics_applicable", True)
+                    for row in episode_records
+                ) else "not_applicable_for_ucr_jsf_l"
+            ),
+            "ucr_jsf_l_stall_step_ratio": float(np.mean([
+                row.get("ucr_jsf_l_stall_step_ratio", 0.0)
+                for row in episode_records
+            ])),
+            "ucr_jsf_l_passing_side_flip_count": int(np.sum([
+                row.get("ucr_jsf_l_passing_side_flip_count", 0)
+                for row in episode_records
+            ])),
+            "ucr_jsf_l_liveness_recovery_success_rate": float(np.mean([
+                row.get("ucr_jsf_l_liveness_recovery_success_rate", 0.0)
+                for row in episode_records
+            ])),
+            "ucr_jsf_l_goal_exit_count": int(np.sum([
+                np.sum(row.get("goal_exit_counts", ()))
+                for row in episode_records
+            ])),
+            "ucr_jsf_l_candidate_unknown_rate": float(np.mean([
+                row.get("ucr_jsf_l_candidate_unknown_rate", 0.0)
+                for row in episode_records
+            ])),
+            "ucr_jsf_l_joint_intervention_rate": float(np.mean([
+                row.get("ucr_jsf_l_joint_intervention_rate", 0.0)
+                for row in episode_records
+            ])),
             "task_config_override_used": bool(
                 self.generic_task_config_override_used
             ),
@@ -4012,6 +4192,7 @@ class PPOTrainer:
         allow_selector_config_mismatch: bool = False,
         allow_ood_evaluation_config_mismatch: bool = False,
         allow_safety_ablation_config_mismatch: bool = False,
+        allow_safety_executor_transition: bool = False,
         allow_recovery_study_evaluation: bool = False,
         allow_curriculum_obstacle_transition: bool = False,
     ) -> None:
@@ -4037,6 +4218,18 @@ class PPOTrainer:
         runtime_fingerprint = self.task_config_fingerprint()
         mismatch = checkpoint_fingerprint != runtime_fingerprint
         checkpoint_task_config = payload.get("task_config", {})
+        if allow_safety_executor_transition and any((
+            allow_task_config_mismatch,
+            allow_reward_config_mismatch,
+            allow_selector_config_mismatch,
+            allow_ood_evaluation_config_mismatch,
+            allow_safety_ablation_config_mismatch,
+            allow_recovery_study_evaluation,
+            allow_curriculum_obstacle_transition,
+        )):
+            raise ValueError(
+                "safety executor transition cannot combine with other overrides"
+            )
         recovery_study_only = False
         if allow_recovery_study_evaluation:
             canonical_parent = json.dumps(checkpoint_task_config, sort_keys=True, separators=(",", ":"))
@@ -4044,7 +4237,9 @@ class PPOTrainer:
                 raise ValueError("checkpoint fingerprint does not match stored contract")
             if any((allow_task_config_mismatch, allow_reward_config_mismatch,
                     allow_selector_config_mismatch, allow_ood_evaluation_config_mismatch,
-                    allow_safety_ablation_config_mismatch, allow_curriculum_obstacle_transition)):
+                    allow_safety_ablation_config_mismatch,
+                    allow_safety_executor_transition,
+                    allow_curriculum_obstacle_transition)):
                 raise ValueError("recovery study cannot combine checkpoint overrides")
             parent = deepcopy(checkpoint_task_config)
             child = self._task_config_payload()
@@ -4081,6 +4276,8 @@ class PPOTrainer:
         ood_evaluation_only_mismatch = False
         safety_ablation_only_mismatch = False
         safety_ablation_changes: dict[str, dict[str, bool]] = {}
+        safety_executor_transition_only_mismatch = False
+        safety_executor_transition: dict[str, str] = {}
         curriculum_only_mismatch = False
         curriculum_transition: dict[str, Any] | None = None
         if mismatch and allow_reward_config_mismatch:
@@ -4130,6 +4327,23 @@ class PPOTrainer:
             safety_ablation_only_mismatch = registered_changes is not None
             if registered_changes is not None:
                 safety_ablation_changes = registered_changes
+        if mismatch and allow_safety_executor_transition:
+            canonical_parent = json.dumps(
+                checkpoint_task_config, sort_keys=True, separators=(",", ":")
+            )
+            if hashlib.sha256(canonical_parent.encode("utf-8")).hexdigest() != checkpoint_fingerprint:
+                raise ValueError(
+                    "checkpoint fingerprint does not match stored task contract"
+                )
+            registered_transition = _registered_safety_executor_transition(
+                checkpoint_task_config,
+                self._task_config_payload(),
+            )
+            safety_executor_transition_only_mismatch = (
+                registered_transition is not None
+            )
+            if registered_transition is not None:
+                safety_executor_transition = registered_transition
         if mismatch and allow_curriculum_obstacle_transition:
             encoded_parent_contract = json.dumps(
                 checkpoint_task_config, sort_keys=True, separators=(",", ":")
@@ -4171,6 +4385,7 @@ class PPOTrainer:
             or selector_only_mismatch
             or ood_evaluation_only_mismatch
             or safety_ablation_only_mismatch
+            or safety_executor_transition_only_mismatch
             or curriculum_only_mismatch
             or recovery_study_only
         ):
@@ -4187,6 +4402,7 @@ class PPOTrainer:
             and not selector_only_mismatch
             and not ood_evaluation_only_mismatch
             and not safety_ablation_only_mismatch
+            and not safety_executor_transition_only_mismatch
         )
         self.selector_intervention_used = bool(
             selector_only_mismatch
@@ -4204,12 +4420,17 @@ class PPOTrainer:
             safety_ablation_only_mismatch
         )
         self.safety_ablation_changes = deepcopy(safety_ablation_changes)
+        self.safety_executor_transition_used = bool(
+            safety_executor_transition_only_mismatch
+        )
+        self.safety_executor_transition = deepcopy(safety_executor_transition)
         self.parent_task_config_fingerprint = (
             str(checkpoint_fingerprint)
             if (
                 selector_only_mismatch
                 or ood_evaluation_only_mismatch
                 or safety_ablation_only_mismatch
+                or safety_executor_transition_only_mismatch
                 or curriculum_only_mismatch
                 or recovery_study_only
             )

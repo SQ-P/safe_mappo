@@ -24,6 +24,22 @@ from src.safety.config_guard import (
 from src.utils.io_utils import load_yaml, save_json
 
 
+def _normalize_disabled_oracle_for_safety_executor_transition(
+    config: dict,
+) -> None:
+    """Restore an omitted historical OFF flag for the registered evaluator.
+
+    Older OFF checkpoints predate the explicit ``generation_enabled`` field.
+    The registered staged-to-UCR transition already treats that omission as
+    ``False`` while Oracle itself is disabled.  Apply the same narrow
+    normalization before the active-config guard constructs the evaluator.
+    """
+
+    oracle = config.get("oracle_subgoal")
+    if isinstance(oracle, dict) and oracle.get("enabled") is False:
+        oracle.setdefault("generation_enabled", False)
+
+
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default="configs/active/standard_mappo_3u_8s2d.yaml")
@@ -42,6 +58,15 @@ def parse_args(argv=None):
         help=(
             "evaluation-only: allow only registered Guard, TTC, final-Guard "
             "and recovery Boolean switches to differ from the checkpoint"
+        ),
+    )
+    parser.add_argument(
+        "--allow-safety-executor-transition",
+        action="store_true",
+        help=(
+            "evaluation-only: allow exactly staged_joint_guard_ttc_v1 to "
+            "ucr_jsf_l_v1 or ucr_jsf_l_v2 while every non-safety task "
+            "contract stays frozen"
         ),
     )
     parser.add_argument(
@@ -75,6 +100,7 @@ def main(argv=None):
         args.allow_task_config_override,
         args.allow_ood_eval_intervention,
         args.allow_safety_ablation,
+        args.allow_safety_executor_transition,
     ))
     if override_modes > 1:
         raise ValueError(
@@ -128,6 +154,8 @@ def main(argv=None):
         for key in ("subgoal_selector", "llm_subgoal_selector"):
             if key in saved_config:
                 config[key] = copy.deepcopy(saved_config[key])
+        if args.allow_safety_executor_transition:
+            _normalize_disabled_oracle_for_safety_executor_transition(config)
         if args.allow_ood_eval_intervention:
             saved_count = config.setdefault("env", {}).get(
                 "static_obstacle_num"
@@ -159,6 +187,7 @@ def main(argv=None):
             args.allow_ood_eval_intervention
         ),
         allow_safety_ablation_config_mismatch=args.allow_safety_ablation,
+        allow_safety_executor_transition=args.allow_safety_executor_transition,
     )
     evaluation = dict(config.get("evaluation", {}))
     summary_path = Path(args.summary_output) if args.summary_output else None
@@ -213,6 +242,12 @@ def main(argv=None):
             ),
             "safety_ablation_changes": result.get(
                 "safety_ablation_changes", {}
+            ),
+            "safety_executor_transition_used": result.get(
+                "safety_executor_transition_used", False
+            ),
+            "safety_executor_transition": result.get(
+                "safety_executor_transition", {}
             ),
             "summary_output": str(summary_path.resolve()) if summary_path else None,
             "episode_records": str(records_path.resolve()) if records_path else None,

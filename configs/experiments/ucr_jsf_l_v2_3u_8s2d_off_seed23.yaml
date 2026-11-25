@@ -1,0 +1,91 @@
+# UCR-JSF-L V2: balanced permutation-equivariant joint safety executor.
+extends: ../active/team_v4_rule_tracked.yaml
+
+research_line: ucr_jsf_l_v2
+algorithm: mappo
+device: cuda
+seed: 23
+
+env:
+  num_agents: 3
+  start_y_positions: [25.0, 50.0, 75.0]
+  goal_y_positions: [25.0, 50.0, 75.0]
+  static_obstacle_num: 8
+  dynamic_obstacle_num: 2
+  obstacle_slots: 6
+  observation_schema_version: tracked_obstacle_v2
+  max_episode_steps: 300
+  reward_mode: team_v4_subgoal
+
+oracle_subgoal:
+  enabled: false
+  generation_enabled: false
+  recovery_enabled: false
+
+subgoal_selector:
+  enabled: false
+  version: disabled_archived_v1
+
+safety_execution:
+  enabled: true
+  version: ucr_jsf_l_v2
+  stages: [joint_safety_selection]
+  constraints:
+    prediction_horizon_steps: 3
+    boundary_clearance_m: 3.0
+    boundary_buffer_m: 0.25
+    teammate_safety_distance_m: 6.0
+    obstacle_safety_margin_m: 1.5
+    numerical_tolerance_m: 0.0000001
+    maximum_obstacle_speed_mps: 2.0
+    lost_track_ttl_steps: 2
+  candidates:
+    max_local_candidates_per_agent: 8
+    max_joint_candidates: 64
+    tangent_strength: 0.8
+    emergency_candidate_reserve: 4
+    team_anchor_limit: 8
+    pair_candidate_quota: 15
+    triple_candidate_quota: 16
+  liveness:
+    stall_patience_steps: 12
+    minimum_progress_m: 0.02
+    passing_side_ttl_steps: 20
+    straggler_weight: 1.0
+    stall_weight: 0.25
+    arrival_hold_weight: 2.0
+    actor_deviation_weight: 0.05
+    blockage_distance_m: 12.0
+    blockage_safety_margin_m: 1.5
+    tangential_progress_weight: 0.75
+    passing_side_flip_penalty: 1.0
+    goal_exit_penalty: 20.0
+    passing_side_release_stall_multiplier: 2.0
+  recovery:
+    recovery_minimum_steps: 2
+    recovery_clear_steps: 2
+    stall_clear_steps: 2
+    release_margin_m: 0.25
+  telemetry:
+    schema: JointSafetyTraceV2
+
+train:
+  total_updates: 800
+  intervention_aware:
+    mode: disabled
+  checkpoint_updates: [100, 200, 400, 600, 800]
+  save_every: 100
+  save_periodic_checkpoints: true
+  log_every: 10
+
+evaluation:
+  episodes: 10
+  interval_updates: 100
+  seed_base: 111000
+  updates: [100, 200, 400, 600, 800]
+  save_episode_records: false
+
+output:
+  output_dir: results/experiments/ucr_jsf_l_v2/seed_23
+  checkpoint_dir: results/experiments/ucr_jsf_l_v2/seed_23/checkpoints
+  reject_nonempty: true

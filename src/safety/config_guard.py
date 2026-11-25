@@ -90,6 +90,133 @@ def validate_active_research_config(
             raise ValueError("ia_mappo_v1 requires the shared safety execution stack")
         if str(safety.get("version")) != "staged_joint_guard_ttc_v1":
             raise ValueError("unsupported ia_mappo_v1 safety_execution.version")
+    if research_line == "ucr_jsf_l_v1":
+        env = dict(config.get("env", {}))
+        expected_env = {
+            "num_agents": 3,
+            "static_obstacle_num": 8,
+            "dynamic_obstacle_num": 2,
+            "obstacle_slots": 6,
+            "observation_schema_version": "tracked_obstacle_v2",
+            "max_episode_steps": 300,
+        }
+        mismatches = {
+            key: (env.get(key), expected)
+            for key, expected in expected_env.items()
+            if env.get(key) != expected
+        }
+        if mismatches:
+            raise ValueError(f"ucr_jsf_l_v1 environment contract mismatch: {mismatches}")
+        oracle = dict(config.get("oracle_subgoal", {}))
+        for key in ("enabled", "generation_enabled", "recovery_enabled"):
+            if oracle.get(key) is not False:
+                raise ValueError(f"ucr_jsf_l_v1 requires oracle_subgoal.{key}=false")
+        safety = dict(config.get("safety_execution", {}))
+        if not bool(safety.get("enabled", False)):
+            raise ValueError("ucr_jsf_l_v1 requires safety_execution.enabled=true")
+        if str(safety.get("version")) != "ucr_jsf_l_v1":
+            raise ValueError("ucr_jsf_l_v1 requires its versioned executor")
+        if tuple(safety.get("stages", ())) != ("joint_safety_selection",):
+            raise ValueError("ucr_jsf_l_v1 permits one joint safety selection only")
+        forbidden = {
+            "initial_joint_guard", "obstacle_ttc", "final_joint_guard",
+            "goal_boundary_corridor", "safety_state_machine_version",
+            "candidate_feasibility_version", "recovery_enabled",
+        }
+        present = sorted(forbidden.intersection(safety))
+        if present:
+            raise ValueError(
+                "ucr_jsf_l_v1 may not configure legacy safety stages: "
+                + ", ".join(present)
+            )
+        telemetry = dict(safety.get("telemetry", {}))
+        if telemetry.get("schema") != "JointSafetyTraceV1":
+            raise ValueError("ucr_jsf_l_v1 requires JointSafetyTraceV1 telemetry")
+        constraints = dict(safety.get("constraints", {}))
+        if constraints.get("boundary_clearance_m") != 3.0:
+            raise ValueError(
+                "ucr_jsf_l_v1 registers the preserved 3.0 m wall surface clearance"
+            )
+        if constraints.get("maximum_obstacle_speed_mps") != 2.0:
+            raise ValueError(
+                "ucr_jsf_l_v1 requires the registered 2.0 m/s obstacle bound"
+            )
+        candidates = dict(safety.get("candidates", {}))
+        if candidates.get("max_joint_candidates") != 64:
+            raise ValueError("ucr_jsf_l_v1 requires a 64-candidate total budget")
+        reserve = candidates.get("emergency_candidate_reserve")
+        if not isinstance(reserve, int) or not 1 <= reserve < 64:
+            raise ValueError("ucr_jsf_l_v1 requires a bounded emergency reserve")
+    if research_line == "ucr_jsf_l_v2":
+        env = dict(config.get("env", {}))
+        expected_env = {
+            "num_agents": 3,
+            "static_obstacle_num": 8,
+            "dynamic_obstacle_num": 2,
+            "obstacle_slots": 6,
+            "observation_schema_version": "tracked_obstacle_v2",
+            "max_episode_steps": 300,
+        }
+        mismatches = {
+            key: (env.get(key), expected)
+            for key, expected in expected_env.items()
+            if env.get(key) != expected
+        }
+        if mismatches:
+            raise ValueError(f"ucr_jsf_l_v2 environment contract mismatch: {mismatches}")
+        oracle = dict(config.get("oracle_subgoal", {}))
+        for key in ("enabled", "generation_enabled", "recovery_enabled"):
+            if oracle.get(key) is not False:
+                raise ValueError(f"ucr_jsf_l_v2 requires oracle_subgoal.{key}=false")
+        safety = dict(config.get("safety_execution", {}))
+        if not bool(safety.get("enabled", False)):
+            raise ValueError("ucr_jsf_l_v2 requires safety_execution.enabled=true")
+        if str(safety.get("version")) != "ucr_jsf_l_v2":
+            raise ValueError("ucr_jsf_l_v2 requires its versioned executor")
+        if tuple(safety.get("stages", ())) != ("joint_safety_selection",):
+            raise ValueError("ucr_jsf_l_v2 permits one joint safety selection only")
+        forbidden = {
+            "initial_joint_guard", "obstacle_ttc", "final_joint_guard",
+            "goal_boundary_corridor", "safety_state_machine_version",
+            "candidate_feasibility_version", "recovery_enabled",
+        }
+        present = sorted(forbidden.intersection(safety))
+        if present:
+            raise ValueError(
+                "ucr_jsf_l_v2 may not configure legacy safety stages: "
+                + ", ".join(present)
+            )
+        telemetry = dict(safety.get("telemetry", {}))
+        if telemetry.get("schema") != "JointSafetyTraceV2":
+            raise ValueError("ucr_jsf_l_v2 requires JointSafetyTraceV2 telemetry")
+        constraints = dict(safety.get("constraints", {}))
+        if constraints.get("boundary_clearance_m") != 3.0:
+            raise ValueError(
+                "ucr_jsf_l_v2 registers the preserved 3.0 m wall surface clearance"
+            )
+        if constraints.get("maximum_obstacle_speed_mps") != 2.0:
+            raise ValueError(
+                "ucr_jsf_l_v2 requires the registered 2.0 m/s obstacle bound"
+            )
+        candidates = dict(safety.get("candidates", {}))
+        expected_candidates = {
+            "max_local_candidates_per_agent": 8,
+            "max_joint_candidates": 64,
+            "emergency_candidate_reserve": 4,
+            "team_anchor_limit": 8,
+            "pair_candidate_quota": 15,
+            "triple_candidate_quota": 16,
+        }
+        candidate_mismatches = {
+            key: (candidates.get(key), expected)
+            for key, expected in expected_candidates.items()
+            if candidates.get(key) != expected
+        }
+        if candidate_mismatches:
+            raise ValueError(
+                "ucr_jsf_l_v2 candidate budget mismatch: "
+                f"{candidate_mismatches}"
+            )
 
 
 def validate_checkpoint_research_line(

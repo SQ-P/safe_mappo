@@ -1,4 +1,4 @@
-"""Train PPO, MAPPO or HAPPO from a YAML configuration."""
+"""Train the active recurrent MAPPO configuration."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from src.utils.io_utils import load_yaml
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", default="configs/ppo.yaml")
+    parser.add_argument("--config", default="configs/active/standard_mappo_3u_8s2d.yaml")
     parser.add_argument("--resume", default=None)
     parser.add_argument("--total-updates", type=int, default=None)
     parser.add_argument("--seed", type=int, default=None)

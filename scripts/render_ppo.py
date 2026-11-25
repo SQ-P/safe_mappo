@@ -1,4 +1,4 @@
-"""Render deterministic or stochastic PPO/MAPPO/HAPPO trajectories."""
+"""Render deterministic or stochastic MAPPO trajectories."""
 
 from __future__ import annotations
 
@@ -20,8 +20,8 @@ from src.visualization.replay import collect_replay_episode
 
 
 def parse_args(argv=None):
-    parser = argparse.ArgumentParser(description="Render a PPO checkpoint to MP4")
-    parser.add_argument("--config", default="configs/ppo.yaml")
+    parser = argparse.ArgumentParser(description="Render a MAPPO checkpoint to MP4")
+    parser.add_argument("--config", default="configs/active/standard_mappo_3u_8s2d.yaml")
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--episodes", type=int, default=3)
     parser.add_argument("--output-dir")

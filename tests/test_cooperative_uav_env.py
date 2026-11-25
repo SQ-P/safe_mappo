@@ -3,6 +3,7 @@ import pytest
 
 from src.envs.cooperative_uav_env import CooperativeUAVEnv
 from src.envs.entities import CircularObstacle
+from src.utils.io_utils import load_yaml
 
 
 def base_config(num_agents=2, static_obstacles=0, dynamic_obstacles=0):
@@ -109,6 +110,28 @@ def test_start_jitter_and_crossed_goals():
     assert np.all(np.abs(env.positions[:, 1] - [35.0, 65.0]) <= 2.0)
     assert np.allclose(info["goals"], [[95.0, 65.0], [95.0, 35.0]])
     assert np.array_equal(info["subgoals"], info["goals"])
+
+
+def test_subgoal_generation_switch_uses_final_goals_without_replanning(monkeypatch):
+    config = load_yaml("configs/active/standard_mappo_3u_8s2d.yaml")
+    config["oracle_subgoal"]["generation_enabled"] = False
+    env = CooperativeUAVEnv({
+        **config["env"],
+        "reward": config["reward"],
+        "oracle_subgoal": config["oracle_subgoal"],
+        "subgoal_selector": config["subgoal_selector"],
+        "safety_execution": config["safety_execution"],
+    })
+    monkeypatch.setattr(env, "_generate_valid_subgoals", lambda *args: pytest.fail(
+        "subgoal generation ran with the switch disabled"
+    ))
+    observations, info = env.reset(seed=23)
+    assert observations.shape == (3, 52)
+    assert info["subgoal_generation_enabled"] is False
+    np.testing.assert_array_equal(info["subgoals"], info["goals"])
+    env.step(np.zeros((3, 2), dtype=np.float32))
+    assert env.subgoal_replan_count == 0
+    np.testing.assert_array_equal(env.subgoals, env.goals)
 
 
 def test_acceleration_kinematics_uses_dt_and_component_clip():

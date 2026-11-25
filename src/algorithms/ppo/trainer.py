@@ -737,7 +737,11 @@ class PPOTrainer:
             "task_contract_version": 4,
             "env": env_config,
             "reward": dict(self.config.get("reward", {})),
-            "oracle_subgoal": dict(self.config.get("oracle_subgoal", {})),
+            "oracle_subgoal": {
+                key: value
+                for key, value in dict(self.config.get("oracle_subgoal", {})).items()
+                if key != "generation_enabled" or value is False
+            },
             "subgoal_selector": dict(self.config.get("subgoal_selector", {})),
             "safety_execution": deepcopy(
                 self.config.get("safety_execution", {})

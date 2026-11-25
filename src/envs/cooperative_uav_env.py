@@ -256,6 +256,7 @@ class CooperativeUAVEnv(gym.Env):
         # Oracle 仅生成 observation 中已有的 2D subgoal，不改变低层网络输入宽度。
         oracle_defaults = {
             "enabled": False,
+            "generation_enabled": True,
             "replanning_interval": 20,
             "lookahead_distance": 15.0,
             "sensor_range": 25.0,
@@ -284,6 +285,11 @@ class CooperativeUAVEnv(gym.Env):
         if not np.isfinite(self.subgoal_identity_tolerance) or self.subgoal_identity_tolerance <= 0:
             raise ValueError("target_identity_tolerance must be finite and positive")
         self.oracle_enabled = bool(self.oracle_config["enabled"])
+        if not isinstance(self.oracle_config["generation_enabled"], bool):
+            raise ValueError("oracle_subgoal.generation_enabled must be a Boolean")
+        self.subgoal_generation_enabled = (
+            self.oracle_enabled and self.oracle_config["generation_enabled"]
+        )
         self.replanning_interval = int(self.oracle_config["replanning_interval"])
         self.subgoal_reach_radius = float(self.oracle_config["subgoal_reach_radius"])
         self.min_subgoal_distance = float(self.oracle_config["min_subgoal_distance"])
@@ -1486,7 +1492,7 @@ class CooperativeUAVEnv(gym.Env):
 
         self._reset_subgoal_metrics()
         self.subgoals = self.goals.copy()
-        if self.oracle_enabled:
+        if self.subgoal_generation_enabled:
             self.subgoals = self._generate_valid_subgoals()
         self._previous_valid_subgoals = self.subgoals.copy()
         self._previous_subgoal_distances = self._subgoal_distances()
@@ -1536,6 +1542,7 @@ class CooperativeUAVEnv(gym.Env):
             "remaining_goal_progress_at_first_collision": None,
             **self._boundary_metric_snapshot(),
             "oracle_subgoal_enabled": self.oracle_enabled,
+            "subgoal_generation_enabled": self.subgoal_generation_enabled,
             **self._obstacle_tracking_metric_snapshot(),
             **self._near_goal_stall_metric_snapshot(),
             **self._obstacle_visibility_metric_snapshot(),
@@ -5849,8 +5856,8 @@ class CooperativeUAVEnv(gym.Env):
                 "closure_state": self.closure_state,
                 "stages": deepcopy(self._current_action_trace),
             })
-        # Diagnostic-only capture on an isolated PPCSA clone. In normal runs
-        # this hook is absent; the existing execution path is unchanged.
+        # Diagnostic-only capture on an isolated clone. In normal runs this
+        # hook is absent and the safety execution path is unchanged.
         ppcsa_capture = getattr(self, "_ppcsa_capture_control", None)
         if ppcsa_capture is not None:
             ppcsa_capture(values.copy(), self, {
@@ -6446,6 +6453,7 @@ class CooperativeUAVEnv(gym.Env):
             "boundary_collision_sides": boundary_sides,
             **self._boundary_metric_snapshot(),
             "oracle_subgoal_enabled": self.oracle_enabled,
+            "subgoal_generation_enabled": self.subgoal_generation_enabled,
             **self._obstacle_tracking_metric_snapshot(),
             **self._near_goal_stall_metric_snapshot(),
             **self._subgoal_metric_snapshot(),
@@ -7773,7 +7781,7 @@ class CooperativeUAVEnv(gym.Env):
 
     def _maybe_replan_subgoals(self, subgoal_distances: np.ndarray) -> bool:
         """按固定周期重规划，并允许到达或动态障碍风险触发提前重规划。"""
-        if not self.oracle_enabled:
+        if not self.subgoal_generation_enabled:
             return False
         if self.subgoal_lifecycle_version == "per_agent_v2":
             return self._maybe_replan_individual_subgoals(subgoal_distances)

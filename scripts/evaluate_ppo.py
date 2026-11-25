@@ -1,4 +1,4 @@
-"""Evaluate a PPO, MAPPO or HAPPO checkpoint."""
+"""Evaluate a recurrent MAPPO checkpoint."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ from src.utils.io_utils import load_yaml, save_json
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", default="configs/ppo.yaml")
+    parser.add_argument("--config", default="configs/active/standard_mappo_3u_8s2d.yaml")
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--episodes", type=int, default=None)
     parser.add_argument("--seed-base", type=int, default=None)

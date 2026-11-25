@@ -30,6 +30,7 @@ multi_agent:
 
 oracle_subgoal:
   enabled: true
+  generation_enabled: true
 
 subgoal_selector:
   enabled: false
